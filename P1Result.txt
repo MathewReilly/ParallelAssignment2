@@ -1,1 +1,1 @@
-It took 0.027225 seconds and 389157 iterations for 100 threads to be sure everyone entered.
+It took 0.037283 seconds and 570978 iterations for 100 threads to be sure everyone entered.

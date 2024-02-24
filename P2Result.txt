@@ -1,1 +1,1 @@
-32.4854 seconds to appease all 100000 guests that were allowed to queue up to 5 times.
+0.00336 seconds to appease all 100 guests that were allowed to queue up to 5 times.
