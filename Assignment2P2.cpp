@@ -2,7 +2,8 @@
 // COP4520
 // Assignment 2
 // Description:
-//    .
+//    This code follows the second part of problem 2, implementing a queue based strategy allowing guest to see a one person at
+//    a time showroom. My implementation follows the ArrayLock where threads inform eachother through a boolean array.
 #include <iostream>
 #include <cstdlib>
 #include <thread>
@@ -10,57 +11,23 @@
 #include <atomic>
 #include <vector>
 #include <chrono>
+#include <fstream>
 using namespace std;
 
-
-/*
-Problem 2:
-Pick one of the 3 strategies/protocol to enter a showroom one at a time to implement.
-
-1) Guest can check to see if the showroom door is open and try to enter the room.
-
-2) Allows guest to flip a sign at the door indicating "busy" or "available". guest must set the showroom to busy when entering
-available while leaving.
-
-3) Guest would line in a queue. Every guest exiting the room is responsible for notifying guest standing in front of the queue
-that the showroom is available. Guest can queue multiple times.
-
-Which strategy will you choose and why? - what are the advantages and disadvantages
-
-- The guests should choose strategy 3, because forming a queue will be the most effecient way for everyone to see the room.
-Strategies 1 and 2 run into the problem of starving out some of the guests, preventing them from entering the showroom.
-
-- The issue with strategy 1 is having the guest checking to see if the showroom is open is a matter of the
- test and set lock. Trying to continually acquire the showroom causes all of the threads to be waiting outside the door,
- and when one finally is let in, the remaining ones that try to enter will be invalidated and incur a time penalty. Not only
- does this time penalty occur, but some guests/threads may never enter the showroom as they are starved out.
- 
-- The issue is similar with stragety 2, behaving similarly to the test and test and set locks. In this implementation, 
-  the guest are constantly waiting for the room to be open, pouncing at the first opportunity. Again, waves of threads will
-  try to enter ad the same time, causes mass invalidations. Although less of the threads are likely to collide and slow things
-  down, and it is an improvement over normal test and set, when there are many guest the implementation slows down significantly.
-  Again, guests/threads can be starved out.
-
-- Strategy 3 can completely avoid the invalidations created by strategy 1 and 2. By queuing the threads, they will avoid competing
-  for the show room and not create these invalidations. Additionally this implementation helps avoid starving the threads,
-  as long as a thread is queued it will eventually make it to the show room. The biggest drawback with this queue implementation
-  is that it requires additional memory and structural support. Will require memory in managing them and in some cases empty elements
-  to prevent cache lines being overwritten.
-
-*/
-
-mutex arrLockMutex;
-
+// This declares a thread local variable that will keep track of a threads index.
 thread_local int myGuestIndex;
 
+// This class implements an ArrayLock which is a queue based lock. In it the threads are queued based on their index and
+// informed of their turn through a boolean array that is set by the predecessor node.
 class ArrayLock
 {
   private:
     int tail;
     int size; // keeps track of the number of guests
-    vector<bool> turnTracker; // false means it is yet to be the threads turn, does it need to be marked volitile???
+    vector<bool> turnTracker; // false means it is yet to be the threads turn, true means it is that threads turn
 
   public:
+    // constructor to initialize the lock
     ArrayLock(int size)
     {
       // do I need to lock this section?
@@ -70,42 +37,38 @@ class ArrayLock
       turnTracker[0] = true;
     }
 
+    // This will prevent other threads from accessing the lock as only one thread will have access to the object, and hold onto
+    // it until the thread relinquish it.
     void lock()
     {
-      // arrLockMutex.lock(); // do I need to mutex this, it is critical but won't this function lock on it's own?
+      // set the current tail thread based on the current tail position, increase the tail position.
       int guestIndex = tail % size;
       tail++;
       myGuestIndex = guestIndex;
-      //cout << myGuestIndex << " " << tail << endl;
-      while(!turnTracker[guestIndex]){};
+      while(!turnTracker[guestIndex]){}; // holds onto the lock until relinquished by thread.
     }
 
+    // Will release the lock and allow the next thread to begin.
     void unlock()
     {
       int guestIndex = myGuestIndex;
       turnTracker[guestIndex] = false;
-      //arrLockMutex.unlock(); Is this another critical section thing?
       turnTracker[(guestIndex + 1) % size] = true;
-      
     }
 
 };
 
-// For this problem I will use a queue lock. (not sure which type will best reflect requirements)
-
-// to implement this lock first there needs to be a way to represent the guests as threads, where each guest 
-// will hold a lock.
-
-// cupcake represents lock???
+// Each thread will have access to the same lock object, the array lock, a number representing that guest and the number of times
+// that thread decides to requeue.
 void guest(ArrayLock *showRoomLock, int number, int requeueCount)
 {
+  // This allows threads with a requeueCount > 0 to take another position in the queue.
   while(requeueCount > 0)
   {
     showRoomLock->lock();
-    // not sure if this is really reflective of the same guest every time they enter....
-    //cout << "guest " << number << " has accessed the showroom. ";
+      // guest enters the showroom and views it
+      // when the guest exists they inform the next person in queue
     showRoomLock->unlock();
-    //cout << myGuestIndex << endl;
     requeueCount--;
   }
   
@@ -114,22 +77,27 @@ void guest(ArrayLock *showRoomLock, int number, int requeueCount)
 
 int main()
 {
+  // array to hold all of the threads
   vector<thread> threads;
 
+  // takes input on number of guests/threads
   int numberGuests = 0;
-  cout << "Please Enter the Number of Guests: " << endl;
+  cout << "Please enter the number of guests: " << endl;
   cin>>numberGuests;
 
-   ArrayLock showRoomLock(numberGuests);
+  // the shared lock is created here
+  ArrayLock showRoomLock(numberGuests);
 
   // start the clock and run the threads to completion
   auto start = chrono::high_resolution_clock::now();
 
+  // each guest is created and the number of times they queue is decided.
   for(int i = 0; i < numberGuests; i++)
   {
     threads.emplace_back(guest, &showRoomLock, i, rand() % 5);
   }
 
+  // makes sure every guest finishes viewing
   for(int i = 0; i < numberGuests; i++)
   {
     threads[i].join();
@@ -141,7 +109,10 @@ int main()
   // calculate time in seconds
   double timeSeconds = duration.count() / 1000000.0;
 
-  cout << timeSeconds << " seconds to appease all " << numberGuests << " guests that were allowed to queue up to 5 times." << endl;
+  // output for that run is output to a file.
+  ofstream showroomPrintFile("P2Result.txt");
+  showroomPrintFile << timeSeconds << " seconds to appease all " << numberGuests << " guests that were allowed to queue up to 5 times." << endl;
+  showroomPrintFile.close();
 
   return 0;
 }

@@ -1,0 +1,1 @@
+32.4854 seconds to appease all 100000 guests that were allowed to queue up to 5 times.
